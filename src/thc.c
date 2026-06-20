@@ -59,6 +59,12 @@ static volatile bool   thc_busy          = false;
 static volatile bool arc_ok_filtered     = false;
 static uint8_t       arc_ok_debounce_cnt = 0;
 
+// Cached feed-lock decision. Computed in the main thread by
+// thc_update_feed_lock() and only read by the TIMER2 ISR. Keeps the ISR free of
+// floating point and planner/stepper call chains. Defaults to locked (safe:
+// don't move the torch).
+static volatile bool thc_feed_locked = true;
+
 bool thc_arc_ok() { return arc_ok_filtered; }
 
 static void setup_timer_2(uint8_t val);
@@ -138,6 +144,7 @@ void thc_init()
   thc_manual_action       = STAY;
   arc_ok_filtered         = false;
   arc_ok_debounce_cnt     = 0;
+  thc_feed_locked         = true;
   // Speed profile calculation
   float speed_step = settings.max_rate[Z_AXIS] / SPEED_PROFILE_RESOLUTION;
   speed_profile[0] = THC_PULSE_PERIOD_MAX;
@@ -211,25 +218,34 @@ void thc_set_manual_action(enum THC_Action action)
 
 void thc_clear_manual_action() { thc_manual_action = STAY; }
 
-static bool thc_feed_lock_active()
+// Recomputes the cached feed-lock decision. Runs in the main thread
+// (protocol_exec_rt_system), never in an ISR: it does floating point and
+// planner/stepper lookups. The TIMER2 ISR only reads thc_feed_locked.
+//
+// nominal speed is intentionally recomputed rather than stored, because it
+// depends on the live feed/rapid override values which can change at any time.
+void thc_update_feed_lock()
 {
   plan_block_t* block = plan_get_current_block();
   if (block == NULL) {
-    return false;
+    thc_feed_locked = true;
+    return;
   }
   if (block->condition &
       (PL_COND_FLAG_RAPID_MOTION | PL_COND_FLAG_SYSTEM_MOTION)) {
-    return true;
+    thc_feed_locked = true;
+    return;
   }
 
   float nominal_rate = plan_compute_profile_nominal_speed(block);
   float actual_rate  = st_get_realtime_rate();
   if (nominal_rate <= 0.0f || actual_rate <= 0.0f) {
-    return true;
+    thc_feed_locked = true;
+    return;
   }
 
-  return (actual_rate * 100.0f) <
-         (nominal_rate * (float) THC_FEED_LOCKOUT_PERCENT);
+  thc_feed_locked =
+    actual_rate < (nominal_rate * (float) THC_FEED_LOCKOUT_FACTOR);
 }
 
 // Sets the target THC voltage from e.g $T=112.5
@@ -426,7 +442,7 @@ ISR(TIMER2_OVF_vect)
         // Update THC
         // We have an arc_ok signal, and THC is 'on'
         // Wait 3 seconds for arc voltage to stabalize
-        if (thc_feed_lock_active()) {
+        if (thc_feed_locked) {
           thc_target_speed        = 0;
           thc_antidive_hold_ticks = 0;
           thc_prev_adc_value      = thc_adc_value_safe;

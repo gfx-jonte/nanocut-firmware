@@ -30,7 +30,7 @@
 
 // Freeze THC when the real feed rate falls below this percent of the planned
 // block speed. This prevents corner/slowdown dives.
-#define THC_FEED_LOCKOUT_PERCENT 85
+#define THC_FEED_LOCKOUT_FACTOR 0.85f
 
 // Hold off over-voltage correction for a short time after a fast positive
 // voltage step, which typically indicates crossing a void or slat.
@@ -44,8 +44,8 @@
 #define THC_AUTO_MED_IDX 10
 #define THC_AUTO_FAST_IDX 20
 
-// Number of consecutive same-value samples (each at THC_UPDATE_PERIOD_MS = 5 ms)
-// the arc okay input must read before its filtered state flips. Filters out
+// Number of consecutive same-value samples (each at THC_UPDATE_PERIOD_MS = 5
+// ms) the arc okay input must read before its filtered state flips. Filters out
 // brief transients so we don't engage THC -- or report ARC_OK to the host --
 // on noise spikes during jog or other non-cutting motion.
 #define ARC_OK_DEBOUNCE_SAMPLES 5
@@ -60,12 +60,13 @@
 enum THC_Action { WITHDRAW = -1, STAY = 0, APPROACH = 1 };
 void  thc_init();
 void  thc_update();
+void  thc_update_feed_lock();
 bool  thc_set_voltage_target(float input);
 float thc_get_voltage();
 void  thc_set_manual_action(enum THC_Action action);
 void  thc_clear_manual_action();
 // Debounced arc okay state. True when a real arc is detected (i.e. the input
 // pin has read low for at least ARC_OK_DEBOUNCE_SAMPLES consecutive samples).
-bool  thc_arc_ok();
+bool thc_arc_ok();
 
 #endif // thc_h

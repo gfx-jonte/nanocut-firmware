@@ -531,6 +531,9 @@ void protocol_exec_rt_system()
   // Reload step segment buffer
   if (sys.state & (STATE_CYCLE | STATE_HOLD | STATE_SAFETY_DOOR | STATE_HOMING | STATE_SLEEP| STATE_JOG)) {
     st_prep_buffer();
+    // Refresh the cached THC feed-lock decision here (main thread) so the
+    // TIMER2 ISR stays free of floating point and planner/stepper lookups.
+    thc_update_feed_lock();
   }
 
 }
